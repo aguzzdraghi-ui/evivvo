@@ -1,12 +1,17 @@
 "use client"
 
-import { useState, useMemo, useEffect, Suspense } from "react"
+import { useEffect, useMemo, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Navbar, Footer } from "@/src/components/landing"
-import { ProfessionalCard, ProfessionalsFilters } from "@/src/components/professionals"
-import { createClient } from "@/src/lib/supabase/client"
+import { PublicProfessionalCard } from "@/src/components/professionals/public-professional-card"
+import { ProfessionalsFilterBar } from "@/src/components/professionals/professionals-filter-bar"
+import { EvaEntryCard } from "@/src/components/eva/eva-entry-card"
+import { TrustChips } from "@/src/components/shared/trust-chips"
 import { PlusPromoCard } from "@/src/components/plus"
-import { Sparkles, X } from "lucide-react"
+import { getPublicProfessionals } from "@/src/lib/professionals/public-queries"
+import type { PublicProfessionalListItem } from "@/src/lib/professionals/public-types"
+import { EXPLORER_FILTERS, type ExplorerFilterId } from "@/src/lib/professionals/taxonomy"
+import { Sparkles, ShieldCheck, Lock, Video, X } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
@@ -19,184 +24,132 @@ interface EvaSummary {
   fecha: string
 }
 
-interface SupabaseProfessional {
-  id: string
-  tipo: string
-  especialidades: string[]
-  precio: number
-  duracion: number
-  online: boolean
-  visible: boolean
-  estado: string
-  verificacion: string
-  descripcion: string
-  experiencia: number
-  rating: number
-  profiles: {
-    nombre: string
-    apellido: string
-    foto_url: string | null
-  }
-}
-
 function ProfessionalsContent() {
   const searchParams = useSearchParams()
   const initialSpecialty = searchParams.get("specialty")
   const isMatch = searchParams.get("match") === "true"
   const disponibleParam = searchParams.get("disponible") === "true"
 
-  const [professionals, setProfessionals] = useState<SupabaseProfessional[]>([])
+  const [professionals, setProfessionals] = useState<PublicProfessionalListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>(
-    initialSpecialty ? [initialSpecialty] : []
-  )
-  const [availableNow, setAvailableNow] = useState(disponibleParam)
   const [evaSummary, setEvaSummary] = useState<EvaSummary | null>(null)
   const [showSummary, setShowSummary] = useState(true)
 
-  // Cargar profesionales desde Supabase
-  useEffect(() => {
-    async function fetchProfessionals() {
-      setLoading(true)
-      setError(null)
-      
-      const supabase = createClient()
-      const { data, error: fetchError } = await supabase
-        .from('professionals')
-        .select(`
-          id,
-          tipo,
-          especialidades,
-          precio,
-          duracion,
-          online,
-          visible,
-          estado,
-          verificacion,
-          descripcion,
-          experiencia,
-          rating,
-          profiles (
-            nombre,
-            apellido,
-            foto_url
-          )
-        `)
-        .eq('estado', 'activo')
-        .eq('visible', true)
-      
-      if (fetchError) {
-        console.error('[v0] Error fetching professionals:', fetchError)
-        setError('Error al cargar profesionales')
-        setLoading(false)
-        return
-      }
-      
-      setProfessionals(data || [])
-      setLoading(false)
-    }
-    
-    fetchProfessionals()
-  }, [])
+  const [activeFilter, setActiveFilter] = useState<ExplorerFilterId | "para-vos" | null>(() => {
+    if (disponibleParam) return "disponibles"
+    if (initialSpecialty === "ansiedad") return "ansiedad"
+    if (initialSpecialty === "pareja") return "parejas"
+    return null
+  })
 
-  // Cargar resumen de EVA si es match
   useEffect(() => {
     if (isMatch) {
-      const saved = localStorage.getItem('evivvo_eva_summary')
+      const saved = localStorage.getItem("evivvo_eva_summary")
       if (saved) {
-        setEvaSummary(JSON.parse(saved))
+        try {
+          setEvaSummary(JSON.parse(saved))
+          setActiveFilter("para-vos")
+        } catch {
+          // ignore malformed local data
+        }
       }
     }
   }, [isMatch])
 
+  const filterDef = useMemo(() => {
+    if (activeFilter === "para-vos") {
+      return {
+        tipo: null as string | null,
+        specialty: evaSummary?.especialidadesRecomendadas?.[0] ?? null,
+        disponibleAhora: null as boolean | null,
+      }
+    }
+    const match = EXPLORER_FILTERS.find((f) => f.id === activeFilter)
+    return {
+      tipo: match?.tipo ?? null,
+      specialty: match?.specialty ?? null,
+      disponibleAhora: match?.disponibleAhora ?? null,
+    }
+  }, [activeFilter, evaSummary])
+
   useEffect(() => {
-    const specialty = searchParams.get("specialty")
-    if (specialty && !selectedSpecialties.includes(specialty)) {
-      setSelectedSpecialties([specialty])
-    }
-  }, [searchParams, selectedSpecialties])
+    let cancelled = false
 
-  // Mapear profesionales de Supabase al formato del componente
-  const mappedProfessionals = useMemo(() => {
-    return professionals.map(p => ({
-      id: p.id,
-      name: p.profiles ? `${p.profiles.nombre} ${p.profiles.apellido}` : 'Profesional',
-      title: p.tipo || 'Terapeuta',
-      image: p.profiles?.foto_url || '/images/professionals/default.jpg',
-      rating: p.rating || 0,
-      reviews: Math.floor((p.experiencia || 1) * 10),
-      price: p.precio || 0,
-      specialties: p.especialidades || [],
-      description: p.descripcion || '',
-      availableNow: p.online || false,
-      badge: p.verificacion !== 'none' ? p.verificacion : undefined,
-      featured: p.verificacion === 'platinum',
-    }))
-  }, [professionals])
-
-  // Aplicar filtros de especialidad y disponibilidad
-  const filteredProfessionals = useMemo(() => {
-    let result = mappedProfessionals
-
-    if (selectedSpecialties.length > 0) {
-      result = result.filter(p => 
-        p.specialties.some(s => selectedSpecialties.includes(s))
-      )
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await getPublicProfessionals({
+          tipo: filterDef.tipo,
+          specialty: filterDef.specialty,
+          disponibleAhora: filterDef.disponibleAhora,
+        })
+        if (!cancelled) setProfessionals(data)
+      } catch {
+        if (!cancelled) setError("No pudimos cargar los profesionales. Probá de nuevo en unos minutos.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
 
-    if (availableNow) {
-      result = result.filter(p => p.availableNow)
+    load()
+    return () => {
+      cancelled = true
     }
+  }, [filterDef])
 
-    return result
-  }, [mappedProfessionals, selectedSpecialties, availableNow])
-
-  const handleSpecialtyChange = (specialty: string) => {
-    setSelectedSpecialties((prev) =>
-      prev.includes(specialty)
-        ? prev.filter((s) => s !== specialty)
-        : [...prev, specialty]
-    )
-  }
-
-  const handleClearFilters = () => {
-    setSelectedSpecialties([])
-    setAvailableNow(false)
-  }
+  const availableNowCount = professionals.filter((p) => p.disponible_ahora).length
+  const hasEvaSignal = isMatch && !!evaSummary
 
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar />
       <main className="flex-1 py-8 md:py-12">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-foreground md:text-4xl">
-              {isMatch ? "Profesionales recomendados para ti" : "Nuestros profesionales"}
-            </h1>
-            <p className="mt-2 text-muted-foreground">
-              {isMatch 
-                ? "Basado en tu conversación con EVA, estos profesionales son ideales para tu situación"
-                : "Encuentra al profesional ideal para acompañarte en tu proceso de bienestar"
-              }
-            </p>
+          <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
+                <Sparkles className="h-4 w-4" />
+                Profesionales para vos
+              </div>
+              <h1 className="text-3xl font-bold text-foreground md:text-4xl">
+                Encontrá a la{" "}
+                <span className="bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+                  persona indicada
+                </span>
+              </h1>
+              <p className="mt-2 max-w-xl text-muted-foreground">
+                Explorá perfiles verificados, conocé su forma de trabajar y reservá online.
+              </p>
+            </div>
+
+            {!loading && professionals.length > 0 && (
+              <div className="flex items-center gap-2 self-start rounded-full border border-border bg-background px-4 py-2 text-sm font-medium">
+                <span className="relative flex h-2 w-2">
+                  {availableNowCount > 0 && (
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                  )}
+                  <span className={`relative inline-flex h-2 w-2 rounded-full ${availableNowCount > 0 ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+                </span>
+                {availableNowCount} disponibles ahora
+              </div>
+            )}
           </div>
 
-          {/* EVA Summary para match */}
           {isMatch && evaSummary && showSummary && (
             <Card className="mb-6 border-primary/20 bg-gradient-to-r from-primary/5 to-purple-500/5">
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center shrink-0">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-500">
                       <Sparkles className="h-5 w-5 text-white" />
                     </div>
                     <div>
-                      <p className="font-medium text-sm mb-1">EVA entendió tu situación</p>
+                      <p className="mb-1 text-sm font-medium">EVA entendió tu situación</p>
                       <p className="text-sm text-muted-foreground">{evaSummary.resumenSituacion}</p>
                       {evaSummary.emocionesDetectadas?.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">
+                        <div className="mt-2 flex flex-wrap gap-1.5">
                           {evaSummary.emocionesDetectadas.map((emocion) => (
                             <Badge key={emocion} variant="secondary" className="text-xs">
                               {emocion}
@@ -206,10 +159,7 @@ function ProfessionalsContent() {
                       )}
                     </div>
                   </div>
-                  <button 
-                    onClick={() => setShowSummary(false)}
-                    className="text-muted-foreground hover:text-foreground p-1"
-                  >
+                  <button onClick={() => setShowSummary(false)} className="p-1 text-muted-foreground hover:text-foreground" aria-label="Cerrar">
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -217,70 +167,74 @@ function ProfessionalsContent() {
             </Card>
           )}
 
-          {/* Plus Banner para match */}
           {isMatch && (
             <div className="mb-8">
               <PlusPromoCard variant="banner" />
             </div>
           )}
 
-          <div className="mb-8 rounded-2xl border border-border bg-background p-4 md:p-6">
-            <ProfessionalsFilters
-              selectedSpecialties={selectedSpecialties}
-              availableNow={availableNow}
-              onSpecialtyChange={handleSpecialtyChange}
-              onAvailableNowChange={setAvailableNow}
-              onClearFilters={handleClearFilters}
-            />
+          <div className="mb-8 grid gap-6 lg:grid-cols-[280px_1fr]">
+            <div className="hidden lg:block">
+              <EvaEntryCard
+                title="¿No sabés a quién elegir?"
+                description="Contale a EVA qué necesitás y te recomienda el perfil ideal."
+                placeholder="¿Qué estás buscando?"
+                submitLabel="Hablar con EVA"
+                variant="button"
+              />
+            </div>
+
+            <div>
+              <div className="mb-6">
+                <ProfessionalsFilterBar active={activeFilter} onSelect={setActiveFilter} showParaVos={hasEvaSignal} />
+              </div>
+
+              {loading ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="h-96 animate-pulse rounded-[20px] bg-muted" />
+                  ))}
+                </div>
+              ) : error ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-8 text-center">
+                  <p className="text-sm text-muted-foreground">{error}</p>
+                </div>
+              ) : professionals.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    No encontramos profesionales para este filtro. Probá con otro criterio.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {professionals.map((p) => (
+                    <PublicProfessionalCard key={p.id} professional={p} />
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-6 lg:hidden">
+                <EvaEntryCard
+                  title="¿No sabés a quién elegir?"
+                  description="Contale a EVA qué necesitás y te recomienda el perfil ideal."
+                  placeholder="¿Qué estás buscando?"
+                  submitLabel="Hablar con EVA"
+                  variant="button"
+                />
+              </div>
+            </div>
           </div>
 
-          {loading ? (
-            <div className="rounded-2xl border border-border bg-muted/30 p-12 text-center">
-              <p className="text-lg font-medium text-foreground">
-                Cargando profesionales...
-              </p>
-            </div>
-          ) : error ? (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-12 text-center">
-              <p className="text-lg font-medium text-red-700">
-                {error}
-              </p>
-              <p className="mt-2 text-red-600">
-                Por favor, intenta de nuevo más tarde
-              </p>
-            </div>
-          ) : mappedProfessionals.length === 0 ? (
-            <div className="rounded-2xl border border-border bg-muted/30 p-12 text-center">
-              <p className="text-lg font-medium text-foreground">
-                No hay profesionales cargados
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                Pronto tendremos profesionales disponibles para ti
-              </p>
-            </div>
-          ) : filteredProfessionals.length === 0 ? (
-            <div className="rounded-2xl border border-border bg-muted/30 p-12 text-center">
-              <p className="text-lg font-medium text-foreground">
-                No encontramos profesionales con esos filtros
-              </p>
-              <p className="mt-2 text-muted-foreground">
-                Intenta ajustar los filtros para ver más opciones
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="mb-4 text-sm text-muted-foreground">
-                {filteredProfessionals.length === mappedProfessionals.length
-                  ? `${mappedProfessionals.length} profesionales disponibles`
-                  : `${filteredProfessionals.length} de ${mappedProfessionals.length} profesionales`}
-              </div>
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredProfessionals.map((professional, index) => (
-                  <ProfessionalCard key={professional.id} professional={professional} index={index} />
-                ))}
-              </div>
-            </>
-          )}
+          <TrustChips
+            items={[
+              // "Perfiles verificados" only claims what is actually true for at least one loaded profile.
+              ...(professionals.some((p) => p.verificacion !== "ninguno")
+                ? [{ icon: ShieldCheck, label: "Perfiles verificados" }]
+                : []),
+              { icon: Lock, label: "Pago protegido" },
+              { icon: Video, label: "Videollamada privada" },
+            ]}
+          />
         </div>
       </main>
       <Footer />
@@ -290,24 +244,7 @@ function ProfessionalsContent() {
 
 export default function ProfessionalsPage() {
   return (
-    <Suspense fallback={
-      <div className="flex min-h-screen flex-col">
-        <Navbar />
-        <main className="flex-1 py-8 md:py-12">
-          <div className="container mx-auto px-4 md:px-6">
-            <div className="mb-8">
-              <h1 className="text-3xl font-bold text-foreground md:text-4xl">
-                Nuestros profesionales
-              </h1>
-              <p className="mt-2 text-muted-foreground">
-                Cargando profesionales...
-              </p>
-            </div>
-          </div>
-        </main>
-        <Footer />
-      </div>
-    }>
+    <Suspense fallback={null}>
       <ProfessionalsContent />
     </Suspense>
   )

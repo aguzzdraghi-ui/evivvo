@@ -5,9 +5,11 @@ import Image from "next/image"
 import { useState } from "react"
 import { Menu, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useAuth } from "@/src/lib/auth-context"
 
 export function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const { user, isLoading, logout } = useAuth()
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -34,29 +36,51 @@ export function Navbar() {
             Cómo funciona
           </Link>
           <Link
-            href="/#planes"
-            className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-          >
-            Planes
-          </Link>
-          <Link
             href="/profesionales"
             className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
           >
             Profesionales
           </Link>
+          <Link
+            href="/planes"
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+          >
+            Evivvo Plus
+          </Link>
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
-          <Button variant="ghost" asChild>
-            <Link href="/login">Iniciar sesión</Link>
-          </Button>
-          <Button variant="outline" asChild>
-            <Link href="/registro">Regístrate</Link>
-          </Button>
-          <Button asChild className="animate-pulse-blue">
-            <Link href="/profesionales?disponible=true">Hablar ahora</Link>
-          </Button>
+          {isLoading ? (
+            <div className="h-9 w-24 animate-pulse rounded-lg bg-muted" />
+          ) : user ? (
+            <>
+              <Button variant="ghost" onClick={() => logout()}>
+                Cerrar sesión
+              </Button>
+              <Link
+                href="/mi-cuenta"
+                className="flex items-center gap-2 rounded-full border border-border py-1 pl-1 pr-4 transition-colors hover:border-primary/40"
+              >
+                <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                  {user.avatar ? (
+                    <Image src={user.avatar} alt={user.name} width={32} height={32} className="h-full w-full object-cover" />
+                  ) : (
+                    user.name?.[0]?.toUpperCase() || "U"
+                  )}
+                </span>
+                <span className="text-sm font-medium text-foreground">Mi cuenta</span>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" asChild>
+                <Link href="/login">Iniciar sesión</Link>
+              </Button>
+              <Button asChild className="animate-pulse-blue">
+                <Link href="/registro">Comenzar ahora</Link>
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Mobile Menu Button */}
@@ -81,35 +105,57 @@ export function Navbar() {
               Cómo funciona
             </Link>
             <Link
-              href="/#planes"
-              className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Planes
-            </Link>
-            <Link
               href="/profesionales"
               className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
               onClick={() => setIsMenuOpen(false)}
             >
               Profesionales
             </Link>
+            <Link
+              href="/planes"
+              className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+              onClick={() => setIsMenuOpen(false)}
+            >
+              Evivvo Plus
+            </Link>
             <hr className="border-border" />
-            <Button variant="ghost" asChild className="justify-start">
-              <Link href="/login" onClick={() => setIsMenuOpen(false)}>
-                Iniciar sesión
-              </Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/registro" onClick={() => setIsMenuOpen(false)}>
-                Regístrate
-              </Link>
-            </Button>
-            <Button asChild className="animate-pulse-blue">
-              <Link href="/profesionales?disponible=true" onClick={() => setIsMenuOpen(false)}>
-                Hablar ahora
-              </Link>
-            </Button>
+            {user ? (
+              <>
+                <Button variant="outline" asChild>
+                  <Link href="/mi-cuenta" onClick={() => setIsMenuOpen(false)}>
+                    Mi cuenta
+                  </Link>
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="justify-start"
+                  onClick={() => {
+                    logout()
+                    setIsMenuOpen(false)
+                  }}
+                >
+                  Cerrar sesión
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="ghost" asChild className="justify-start">
+                  <Link href="/login" onClick={() => setIsMenuOpen(false)}>
+                    Iniciar sesión
+                  </Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/registro" onClick={() => setIsMenuOpen(false)}>
+                    Regístrate
+                  </Link>
+                </Button>
+                <Button asChild className="animate-pulse-blue">
+                  <Link href="/registro" onClick={() => setIsMenuOpen(false)}>
+                    Comenzar ahora
+                  </Link>
+                </Button>
+              </>
+            )}
           </nav>
         </div>
       )}

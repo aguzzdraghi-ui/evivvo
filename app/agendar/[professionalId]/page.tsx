@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, use } from "react"
+import { useState, useEffect, use } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -26,60 +26,113 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Navbar, Footer } from "@/src/components/landing"
 import { useEvivvoStore } from "@/src/lib/store"
+import { createClient } from "@/src/lib/supabase/client"
+import { getPublicProfessionalById } from "@/src/lib/professionals/public-queries"
+import { TIPO_LABELS } from "@/src/lib/professionals/public-types"
 import type { SessionWithDetails } from "@/src/types/session"
 import { generateGoogleCalendarLink } from "@/src/types/session"
+
+const WEEKDAY_NAMES = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado']
+
+interface WeeklyAvailabilityDay {
+  day: string
+  enabled: boolean
+  slots: { start: string; end: string }[]
+}
 
 export default function AgendarPage({ params }: { params: Promise<{ professionalId: string }> }) {
   const { professionalId } = use(params)
   const router = useRouter()
-  
-  // Usar store centralizado - acceso directo al estado
-  const professionals = useEvivvoStore(state => state.professionals)
+
+  // Sesiones locales (agenda propia del usuario) — sin cambios, fuera de alcance.
   const sessions = useEvivvoStore(state => state.sessions)
   const addSession = useEvivvoStore(state => state.addSession)
-  
-  const storeProfessional = professionals.find(p => p.id === professionalId)
-  
-  // Adaptar formato del store al formato esperado por el componente
-  const professional = storeProfessional ? {
-    id: storeProfessional.id,
-    name: `${storeProfessional.nombre} ${storeProfessional.apellido}`,
-    title: storeProfessional.tipo === 'psicologo' ? 'Psicólogo/a' 
-      : storeProfessional.tipo === 'coach' ? 'Coach'
-      : storeProfessional.tipo === 'psiquiatra' ? 'Psiquiatra'
-      : 'Terapeuta',
-    image: storeProfessional.foto,
-    price: storeProfessional.precio,
-    rating: storeProfessional.rating,
-    reviews: storeProfessional.reviewCount,
-    specialties: storeProfessional.especialidades,
-    availableNow: storeProfessional.estadoOnline,
-    disponibilidad: storeProfessional.disponibilidad,
-  } : null
-  
-  // Configuración del calendario basada en localStorage
+
+  const [professional, setProfessional] = useState<{
+    id: string
+    name: string
+    title: string
+    image: string | null
+    price: number
+    rating: number
+    reviews: number
+    specialties: string[]
+    availableNow: boolean
+  } | null | undefined>(undefined)
+  const [weeklyAvailability, setWeeklyAvailability] = useState<WeeklyAvailabilityDay[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      const data = await getPublicProfessionalById(professionalId)
+      if (cancelled) return
+
+      if (!data) {
+        setProfessional(null)
+        return
+      }
+
+      setProfessional({
+        id: data.id,
+        name: `${data.nombre} ${data.apellido}`,
+        title: TIPO_LABELS[data.tipo],
+        image: data.foto_url,
+        price: data.precio ?? data.precio_min ?? 0,
+        rating: data.rating ?? 0,
+        reviews: data.total_resenas,
+        specialties: data.especialidades,
+        availableNow: data.disponible_ahora,
+      })
+
+      // Disponibilidad real desde professional_availability (pública para
+      // profesionales activos+visibles vía RLS). Sin filas = sin horarios
+      // publicados todavía: no se inventa un horario por defecto.
+      const supabase = createClient()
+      const { data: availabilityRows } = await supabase
+        .from("professional_availability")
+        .select("weekday, start_time, end_time, active")
+        .eq("professional_id", professionalId)
+        .eq("active", true)
+
+      if (cancelled) return
+
+      type AvailabilityRow = { weekday: number; start_time: string; end_time: string; active: boolean }
+      const allRows = (availabilityRows ?? []) as AvailabilityRow[]
+
+      const byDay: WeeklyAvailabilityDay[] = WEEKDAY_NAMES.map((day, weekday) => {
+        const rows = allRows.filter((r) => r.weekday === weekday)
+        return {
+          day,
+          enabled: rows.length > 0,
+          slots: rows.map((r) => ({ start: r.start_time.slice(0, 5), end: r.end_time.slice(0, 5) })),
+        }
+      })
+      setWeeklyAvailability(byDay)
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [professionalId])
+
+  // Configuración del calendario. El profesional puede sobreescribirla desde
+  // su propio panel (localStorage) hasta que ese flujo también persista en
+  // Supabase; si no hay override, se usa la disponibilidad real cargada arriba.
   const getCalendarConfig = () => {
     if (typeof window === 'undefined') return null
     const saved = localStorage.getItem(`evivvo_calendar_${professionalId}`)
     return saved ? JSON.parse(saved) : null
   }
-  
+
   const config = getCalendarConfig() || {
-    weeklyAvailability: storeProfessional?.disponibilidad ? 
-      ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'].map(day => ({
-        day,
-        enabled: storeProfessional.disponibilidad.dias.includes(day),
-        slots: storeProfessional.disponibilidad.dias.includes(day) ? [{
-          start: storeProfessional.disponibilidad.horarioInicio,
-          end: storeProfessional.disponibilidad.horarioFin
-        }] : []
-      }))
-      : [],
+    weeklyAvailability,
     blockedDates: [],
     sessionDuration: 40,
     minNoticeHours: 3,
   }
-  
+
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [selectedTime, setSelectedTime] = useState<string | null>(null)
@@ -94,6 +147,20 @@ export default function AgendarPage({ params }: { params: Promise<{ professional
     cvv: ''
   })
   
+  if (professional === undefined) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        <Navbar />
+        <main className="flex-1 py-12">
+          <div className="container mx-auto animate-pulse px-4 md:px-6">
+            <div className="h-64 rounded-2xl bg-muted" />
+          </div>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
+
   if (!professional) {
     return (
       <div className="flex min-h-screen flex-col">
@@ -303,13 +370,14 @@ export default function AgendarPage({ params }: { params: Promise<{ professional
                   {/* Resumen de la sesión */}
                   <div className="rounded-lg border border-border bg-accent/30 p-4">
                     <div className="flex items-center gap-4">
-                      <div className="relative h-16 w-16 overflow-hidden rounded-full">
-                        <Image
-                          src={professional.image}
-                          alt={professional.name}
-                          fill
-                          className="object-cover"
-                        />
+                      <div className="relative h-16 w-16 overflow-hidden rounded-full bg-muted">
+                        {professional.image ? (
+                          <Image src={professional.image} alt={professional.name} fill className="object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-purple-500/15 text-sm font-semibold text-primary">
+                            {professional.name?.[0]}
+                          </div>
+                        )}
                       </div>
                       <div className="flex-1">
                         <h3 className="font-semibold">{professional.name}</h3>
@@ -532,7 +600,7 @@ export default function AgendarPage({ params }: { params: Promise<{ professional
                       createdAt: new Date().toISOString(),
                       updatedAt: new Date().toISOString(),
                       professionalName: professional.name,
-                      professionalImage: professional.image,
+                      professionalImage: professional.image ?? "",
                       professionalTitle: professional.title,
                       patientName: 'Usuario',
                       patientEmail: 'usuario@email.com',
@@ -564,13 +632,14 @@ export default function AgendarPage({ params }: { params: Promise<{ professional
               <Card className="lg:row-span-2 glass-card">
                 <CardContent className="pt-6">
                   <div className="flex flex-col items-center text-center">
-                    <div className="relative mb-4 h-24 w-24 overflow-hidden rounded-full ring-4 ring-primary/20">
-                      <Image
-                        src={professional.image}
-                        alt={professional.name}
-                        fill
-                        className="object-cover"
-                      />
+                    <div className="relative mb-4 h-24 w-24 overflow-hidden rounded-full bg-muted ring-4 ring-primary/20">
+                      {professional.image ? (
+                        <Image src={professional.image} alt={professional.name} fill className="object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-purple-500/15 text-lg font-semibold text-primary">
+                          {professional.name?.[0]}
+                        </div>
+                      )}
                     </div>
                     <h2 className="text-xl font-bold text-foreground">{professional.name}</h2>
                     <p className="text-sm text-muted-foreground">{professional.title}</p>

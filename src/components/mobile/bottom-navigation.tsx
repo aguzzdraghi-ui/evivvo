@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Search, Calendar, MessageCircle, User } from "lucide-react"
+import { Home, Sparkles, Users, Calendar, User } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 const navItems = [
@@ -12,19 +12,19 @@ const navItems = [
     icon: Home,
   },
   {
+    href: "/#hablar-con-eva",
+    label: "EVA",
+    icon: Sparkles,
+  },
+  {
     href: "/profesionales",
-    label: "Buscar",
-    icon: Search,
+    label: "Profesionales",
+    icon: Users,
   },
   {
     href: "/mi-cuenta/sesiones",
     label: "Sesiones",
     icon: Calendar,
-  },
-  {
-    href: "/mi-cuenta/historial",
-    label: "Historial",
-    icon: MessageCircle,
   },
   {
     href: "/mi-cuenta",
