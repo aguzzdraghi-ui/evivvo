@@ -18,13 +18,22 @@ const evaResponseSchema = z.object({
 
 type EvaResponse = z.infer<typeof evaResponseSchema>
 
+// Palabras de crisis compartidas — reutilizadas tal cual por otros flujos
+// (ej. el chequeo diario de Plus) para no duplicar ni reinventar la
+// detección de riesgo en el frontend.
+const PALABRAS_CRISIS = ["suicidio", "morir", "matarme", "no quiero vivir", "hacerme daño", "autolesión"]
+
+export function detectaCrisis(texto: string): boolean {
+  const lower = texto.toLowerCase()
+  return PALABRAS_CRISIS.some((p) => lower.includes(p))
+}
+
 // Análisis mock basado en palabras clave cuando no hay API key
 function mockAnalysis(mensaje: string, preguntasRealizadas: number): EvaResponse {
   const msgLower = mensaje.toLowerCase()
-  
+
   // Detección de crisis
-  const palabrasCrisis = ["suicidio", "morir", "matarme", "no quiero vivir", "hacerme daño", "autolesión"]
-  if (palabrasCrisis.some(p => msgLower.includes(p))) {
+  if (detectaCrisis(msgLower)) {
     return {
       tipo: "resumen",
       mensajeEmpatico: "Gracias por confiar en mí con algo tan importante.",

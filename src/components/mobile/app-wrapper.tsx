@@ -14,8 +14,8 @@ export function AppWrapper({ children }: AppWrapperProps) {
   const [isCapacitor, setIsCapacitor] = useState(false)
   const [platform, setPlatform] = useState<'ios' | 'android' | 'web'>('web')
   
-  // Pages where we hide the mobile navigation
-  const hideNavPages = ['/login', '/registro', '/admin', '/dashboard']
+  // Pages where we hide the mobile navigation (Plus has its own PlusMobileNavigation)
+  const hideNavPages = ['/login', '/registro', '/admin', '/dashboard', '/plus']
   const shouldHideNav = hideNavPages.some(p => pathname.startsWith(p))
   
   // Show Plus promo on specific pages
